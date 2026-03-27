@@ -26,13 +26,148 @@ class Database:
             name,
             surename,
             int(age),
-            phone
+            phone,
+            role
         )  
 
     async def is_user_exists(self, telegram_id: int) -> bool:
          query = """
          SELECT EXISTS (
-         SELECT 1 FROM users WHERE telegram_id = $1
+         SELECT * FROM users WHERE telegram_id = $1
          );
         """
          return await self.pool.fetchval(query, telegram_id)
+    async def user_profile(self,telegram_id):
+        query='''
+        select name,phone,age,role from users where telegram_id=$1;
+        '''
+        return await self.pool.fetchrow(query,telegram_id)
+    
+    async def get_user_role(self,telegram_id):
+        query='select role from users where telegram_id=$1'
+        return await self.pool.fetchval(query,telegram_id)
+    
+    async def get_users(self):
+        query='select telegram_id, name, role from users order by id'
+        return await self.pool.fetch(query)
+    
+    async def get_users_telegram_id(self):
+        query = "SELECT telegram_id FROM users ORDER BY id"
+        return await self.pool.fetch(query)
+    
+    async def set_user_role(self, telegram_id, role):
+        query = "UPDATE users SET role=$1 WHERE telegram_id=$2"
+        await self.pool.execute(query, role, telegram_id)
+
+    async def get_user_id(self,telegram_id):
+        query='select id  from users   where  telegram_id=$1'
+        return await self.pool.fetchval(query,telegram_id)
+# ------------------------PRODUCTS----------------------------------------
+    async def get_products(self):
+      query = "SELECT * FROM products WHERE is_active=TRUE"
+      return await self.pool.fetch(query)
+    
+    async def app_products(self,name,price,description):
+        query=""" insert into products(name,price,description) values($1,$2,$3)"""
+        await self.pool.execute(query,name, int(price), description)
+    
+    async def delete_product(self,product_id):
+        query=" delete from products where id=$1"
+        await self.pool.execute(query,product_id)
+    
+    async def update_product(self,name,price, description, product_id):
+        query='update products set name=$1, price=$2, description=$3 where id=$4;'
+        await self.pool.execute(query, name, int(price), description,product_id)
+    
+    # orders
+
+    async def  get_or_create_cart(self, user_id):
+        order= await self.pool.fetchrow(
+            """ 
+            select * from orders
+            where user_id =$1 and order_status ='cart'
+            """,  
+            user_id
+          )
+        
+        if order:
+            return order['id']
+        
+
+        order= await self.pool.fetchrow(
+            """ 
+            insert into  orders(user_id)
+            values($1)
+            returning id
+            """,
+            user_id
+        )
+
+        return order["id"]
+    async def  add_product_to_cart(self,user_id, product_id):
+        order_id= await self.get_or_create_cart(user_id)
+
+        await self.pool.execute(
+            """ 
+            insert into order_items(order_id, product_id)
+            values($1,$2)
+            """ , 
+            order_id,
+            product_id
+        ) 
+
+    async def get_cart_products(self,user_id):
+
+        return await self.pool.fetch(
+            """
+            select p.id, p.name, p.price
+            from order_items    oi 
+            join orders o on  oi.order_id=o.id
+            join products p on oi.product_id=p.id
+            where o.user_id =$1 and o.order_status ='cart'
+            """,
+            user_id
+        )
+    
+    
+    async def remove_one_product(self, user_id, product_id,):
+
+     await self.pool.execute(
+        """
+        DELETE FROM order_items
+        WHERE id = (
+            SELECT oi.id
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            WHERE o.user_id = $1
+            AND o.order_status = 'cart'
+            AND oi.product_id = $2
+            LIMIT 1
+        )
+        """,
+        user_id,
+        product_id
+    )
+    
+    async def get_cart_with_total(self, user_id):
+     products = await self.pool.fetch(
+            """
+            select p.id, p.name, p.price
+            from order_items    oi 
+            join orders o on  oi.order_id=o.id
+            join products p on oi.product_id=p.id
+            where o.user_id =$1 and o.order_status ='cart'
+            """,
+            user_id
+        )
+     total = await self.pool.fetchval(
+    """
+    SELECT SUM(p.price)
+    FROM order_items oi
+    JOIN orders o ON oi.order_id = o.id
+    JOIN products p ON oi.product_id = p.id
+    WHERE o.user_id = $1 AND o.order_status = 'cart'
+    """,
+    user_id
+)
+     return products, total

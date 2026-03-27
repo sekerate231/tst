@@ -4,4 +4,4 @@ class RegisterState(StatesGroup):
     name=State()
     full_name=State()
     age=State()
-    number=State()
+    phone=State()
